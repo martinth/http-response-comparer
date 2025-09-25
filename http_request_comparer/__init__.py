@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as _dt
 import json as _json
 import threading as _threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 import difflib
@@ -22,6 +22,9 @@ class FetchResult:
     text: str
     json: Optional[Any]
     error: Optional[str] = None
+    # Metadata of the actual request performed
+    request_url: str = ""
+    request_headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -92,9 +95,23 @@ def _fetch(
         text = resp.text
         js = _try_parse_json(resp)
         headers_resp = {k.lower(): v for k, v in resp.headers.items()}
-        return FetchResult(base_url=base_url, path=path, status_code=resp.status_code, headers=headers_resp, text=text, json=js)
+        # Capture actual requested URL and headers
+        req_url = getattr(resp.request, "url", url)
+        req_headers = dict(getattr(resp.request, "headers", {}) or {})
+        return FetchResult(
+            base_url=base_url,
+            path=path,
+            status_code=resp.status_code,
+            headers=headers_resp,
+            text=text,
+            json=js,
+            error=None,
+            request_url=req_url,
+            request_headers=req_headers,
+        )
     except Exception as e:
-        return FetchResult(base_url=base_url, path=path, status_code=-1, headers={}, text="", json=None, error=str(e))
+        # On error, still include intended URL and headers if available (best effort)
+        return FetchResult(base_url=base_url, path=path, status_code=-1, headers={}, text="", json=None, error=str(e), request_url=url, request_headers=headers)
 
 
 def _json_compare(a: Any, b: Any) -> tuple[bool, str]:
@@ -115,15 +132,31 @@ def _text_diff(a: str, b: str) -> tuple[bool, str]:
     return False, diff
 
 
-def _write_outputs(path: str, content1: str, content2: str, is_json: bool, out_dir: Path) -> tuple[Path, Path]:
+def _write_outputs(
+    path: str,
+    content1: str,
+    content2: str,
+    is_json: bool,
+    out_dir: Path,
+    res1: FetchResult,
+    res2: FetchResult,
+) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     ts = _timestamp()
     sanitized = _sanitize_path_for_filename(path)
     ext = "json" if is_json else "txt"
     f1 = out_dir / f"{ts}_{sanitized}_host1.{ext}"
     f2 = out_dir / f"{ts}_{sanitized}_host2.{ext}"
-    f1.write_text(content1)
-    f2.write_text(content2)
+
+    def _build_comment(url: str, headers: dict[str, str]) -> str:
+        meta = {"url": url, "headers": headers}
+        return "// " + _json.dumps(meta, ensure_ascii=False) + "\n"
+
+    prefixed1 = _build_comment(res1.request_url, res1.request_headers) + content1
+    prefixed2 = _build_comment(res2.request_url, res2.request_headers) + content2
+
+    f1.write_text(prefixed1)
+    f2.write_text(prefixed2)
     return f1, f2
 
 
@@ -193,13 +226,29 @@ def compare_paths(
                 # write pretty JSONs
                 a_str = _json.dumps(res1.json, sort_keys=True, indent=2, ensure_ascii=False)
                 b_str = _json.dumps(res2.json, sort_keys=True, indent=2, ensure_ascii=False)
-                file1, file2 = _write_outputs(path, a_str, b_str, True, out_path)
+                file1, file2 = _write_outputs(
+                    path,
+                    a_str,
+                    b_str,
+                    True,
+                    out_path,
+                    res1,
+                    res2,
+                )
             outcomes.append(CompareOutcome(path, equal, "json", diff, file1, file2))
         else:
             equal, diff = _text_diff(res1.text, res2.text)
             file1 = file2 = None
             if not equal:
-                file1, file2 = _write_outputs(path, res1.text, res2.text, False, out_path)
+                file1, file2 = _write_outputs(
+                    path,
+                    res1.text,
+                    res2.text,
+                    False,
+                    out_path,
+                    res1,
+                    res2,
+                )
             outcomes.append(CompareOutcome(path, equal, "text", diff, file1, file2))
 
     # Close sessions
