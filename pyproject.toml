@@ -3,6 +3,7 @@ name = "http-response-comparer"
 version = "0.1.0"
 description = "Compare HTTP responses for a list of requests between two different hosts"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
     "jsoncomparison>=1.1.0",

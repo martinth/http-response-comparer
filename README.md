@@ -45,3 +45,9 @@ Options:
   // {"url": "https://api/...", "headers": {"Authorization": "Bearer ...", ...}}
 - Paths file: lines starting with # and blank lines are ignored.
 - Exit code: returns 0 if all responses are equal, 1 if any differ.
+
+## Built with Junie
+This tool was written with Junie, the autonomous programmer by JetBrains.
+
+## License
+MIT License. See the LICENSE file for details.
