@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 import difflib
 import re
+from urllib.parse import urlsplit, urlunsplit, parse_qsl
 
 import requests
 
@@ -57,8 +58,29 @@ def _start_barrier():
     return _threading.Barrier(2)
 
 
-def _fetch(base_url: str, path: str, timeout: float, session: requests.Session, start_barrier: _threading.Barrier) -> FetchResult:
-    url = base_url.rstrip("/") + "/" + path.lstrip("/")
+def _fetch(
+    base_url: str,
+    path: str,
+    timeout: float,
+    session: requests.Session,
+    start_barrier: _threading.Barrier,
+    common_params: list[tuple[str, str]] | None,
+    common_headers: dict[str, str] | None,
+) -> FetchResult:
+    # Build URL and merged query params
+    # Split provided path into path part and existing query pairs
+    split = urlsplit(path)
+    path_only = split.path or "/"
+    existing_params = parse_qsl(split.query, keep_blank_values=True)
+    merged_params: list[tuple[str, str]] = []
+    if existing_params:
+        merged_params.extend(existing_params)
+    if common_params:
+        merged_params.extend(common_params)
+
+    url = base_url.rstrip("/") + "/" + path_only.lstrip("/")
+    headers = common_headers or {}
+
     try:
         # wait until both requests are ready to fire
         start_barrier.wait(timeout=timeout)
@@ -66,11 +88,11 @@ def _fetch(base_url: str, path: str, timeout: float, session: requests.Session, 
         # Even if barrier breaks, proceed; we still attempt request
         pass
     try:
-        resp = session.get(url, timeout=timeout)
+        resp = session.get(url, timeout=timeout, params=merged_params or None, headers=headers or None)
         text = resp.text
         js = _try_parse_json(resp)
-        headers = {k.lower(): v for k, v in resp.headers.items()}
-        return FetchResult(base_url=base_url, path=path, status_code=resp.status_code, headers=headers, text=text, json=js)
+        headers_resp = {k.lower(): v for k, v in resp.headers.items()}
+        return FetchResult(base_url=base_url, path=path, status_code=resp.status_code, headers=headers_resp, text=text, json=js)
     except Exception as e:
         return FetchResult(base_url=base_url, path=path, status_code=-1, headers={}, text="", json=None, error=str(e))
 
@@ -112,6 +134,8 @@ def compare_paths(
     *,
     timeout: float = 20.0,
     out_dir: Path | str = ".",
+    common_params: list[tuple[str, str]] | None = None,
+    common_headers: dict[str, str] | None = None,
 ) -> list[CompareOutcome]:
     """
     For each path, concurrently request both hosts and compare responses.
@@ -131,11 +155,11 @@ def compare_paths(
 
         def run1():
             nonlocal res1
-            res1 = _fetch(base_url_1, path, timeout, session1, barrier)
+            res1 = _fetch(base_url_1, path, timeout, session1, barrier, common_params, common_headers)
 
         def run2():
             nonlocal res2
-            res2 = _fetch(base_url_2, path, timeout, session2, barrier)
+            res2 = _fetch(base_url_2, path, timeout, session2, barrier, common_params, common_headers)
 
         t1 = _threading.Thread(target=run1, daemon=True)
         t2 = _threading.Thread(target=run2, daemon=True)

@@ -19,3 +19,17 @@ be different, this is just as example):
 It will then invoke each given path on both base URLs simultaneously and compare the response. Any difference will be
 logged in a clear diff, and the responses will also be written to a file in the current directory for inspection.
 
+### Common parameters
+
+You can add common parameters all outgoing requests, options are:
+
+    ./main.py --param="foo=bar" --param debug
+
+Will add all the "param" flags as GET parameter to all outgoing requests (it will add to existing parameter that might
+be given in the `paths_to_test.txt` file).
+
+You can add also add header parameters:
+
+    ./main.py --header="Authorization: Bearer 123"
+
+Which will be added as headers to all requests.
