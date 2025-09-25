@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 import difflib
 import re
-from urllib.parse import urlsplit, urlunsplit, parse_qsl
+from urllib.parse import urlsplit, parse_qsl
 
 import requests
 
@@ -38,9 +38,16 @@ class CompareOutcome:
 
 
 def _sanitize_path_for_filename(path: str) -> str:
+    """Sanitize only the URL path portion (exclude query/fragment) for filenames."""
+    # Extract only the path segment (ignore ?query and #fragment)
+    try:
+        split = urlsplit(path)
+        path_only = split.path
+    except Exception:
+        path_only = path
     # remove leading slash, replace non-alnum with underscore, collapse repeats
-    path = path.lstrip("/") or "root"
-    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", path)
+    path_only = path_only.lstrip("/") or "root"
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", path_only)
     sanitized = re.sub(r"_+", "_", sanitized).strip("_")
     return sanitized or "root"
 
